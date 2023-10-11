@@ -1,0 +1,176 @@
+---
+title: "Movies Recommender System"
+author: "rodrick "
+date: '2022-06-09'
+output: html_document
+---
+
+#STEP 1: READ & PROCESS THE DATA
+##1.1 Read the Data
+```{r}
+movie_ratings <- read.delim("Movie_rating_data/u.data", header=FALSE, sep="\t")
+head(movie_ratings,n=6)
+```
+
+
+```{r}
+movies <- read.delim("Movie_rating_data/u.item", header=FALSE, sep="|")
+head(movies,n=6)
+```
+##1.2 Process Data
+###1.2.1 Extract necessary columns
+###1.2.2 Rename columns
+```{r}
+ratings_df <-movie_ratings[,-c(4)]
+colnames(ratings_df) <- c("UserId", "MovieId", "Rating")
+head(ratings_df, n=6)
+```
+```{r}
+movies_df <- movies[,c(1:2)]
+colnames(movies_df) <- c("MovieId", "Title")
+head(movies_df, n=6)
+```
+
+###1.2.3 Join the data
+###use left_join() funtion
+### dplyr package
+```{r}
+#install.packages("dplyr")
+```
+
+```{r}
+require(dplyr)
+df_joined <- left_join(ratings_df,movies_df, by="MovieId")
+head(df_joined)
+```
+###1.2.4 drop MovieId  (Column 2)
+```{r}
+df_final <- df_joined[,-c(2)]
+head(df_final, n=6)
+```
+###1.2.5 Rearrange columns
+```{r}
+df_final <- subset(df_final,select=c(1,3,2))
+head(df_final, n=5)
+```
+##install recommenderLab package
+```{r}
+#install.packages("recommenderlab")
+library(recommenderlab)
+```
+#NOTE: WE WERE GETTING ERROR IN CLASS BECAUSE I MESSED UP THE ORDER OF COLUMNS IN THE DATA REQUIRED TO CREATE RATING MATRIX. IT SHOULD BE: ROW_coL, COLUMN_col, RATING_col. I HAD ROW_col, RATING_col, COLUMN_col. (Here ROW_col is the column that becomes the row dimension, COLUMN_col is the column that becomes the column dimension, and RATING_col is the column that becomes the values in the cells when the rating matrix is created). THE CODE BLOCK BELOW PUTS THE DF COLUMNS IN THE PROPER ORDER.
+
+###1.2.5 Convert the data to a real ratings matrix: use getRatingMatrix()
+```{r}
+#df_finalM <- as.matrix(df_final)
+rate_max <- as(df_final, "realRatingMatrix")
+rate_max
+```
+```{r}
+str(rate_max)
+```
+
+###1.2.6 Explore the data
+####Rating frequencies
+```{r}
+rate_freq <- as.data.frame(table(df_final$Rating))
+rate_freq
+```
+####Distribution of rating frequencies
+```{r}
+barplot(rate_freq$Freq,names.arg = c(1,2,3,4,5), xlab="Rating",
+main="Distribution of Rating Frequencies", col=c("red","green", "blue", "yellow", "salmon"), cex.names=0.7, cex.axis=0.5)
+```
+
+From the histogram, the most commonly assigned movie rating is 4, followed by 3, and then 5. One star is the least commonly assigned rating. People probably like the movies that they watch.
+
+
+#STEP 2: IMPLEMENT RECOMMENDATION ALGORITHMS
+## 2.1 Listing of available algorithms 
+```{r}
+recommenderRegistry$get_entries(dataType = "realRatingMatrix")
+```
+
+###2.2 Evaluate various algorithms to choose the best
+### SVD, Popular, UBCF, IBCF: using hold-out (split) an cross-validation
+####2.2.1 Hold-out or split approach
+
+```{r}
+split_scheme <-evaluationScheme(rate_max, method="split", train=0.8, given=5, goodRating=3)
+split_scheme
+```
+####2.2.2 Cross-validation approach (k-fold)
+```{r}
+cv_scheme <-evaluationScheme(rate_max, method="cross-validation", k=5, given=-1, goodRating=3)
+cv_scheme
+```
+##2.2.3 Run the selected algoritms and determine the prediction error
+###Note: one with smallest prediction error is better
+####split technique
+```{r}
+automate <- function(scheme){
+    ##predictor variables
+    r_svd <- Recommender(getData(scheme, "train"), "SVD")
+    r_pop <- Recommender(getData(scheme, "train"), "POPULAR")
+    r_ubcf <- Recommender(getData(scheme, "train"), "UBCF")
+    r_ibcf <- Recommender(getData(scheme, "train"), "IBCF")
+    ##test the models (predictive accuracy)
+    p_svd <- predict(r_svd, getData(scheme, "known"), type="ratings")
+    p_pop <- predict(r_pop,getData(scheme, "known"),  type="ratings")
+    p_ubcf <- predict(r_ubcf,getData(scheme, "known"),  type="ratings")
+    p_ibcf <- predict(r_ibcf,getData(scheme, "known"),  type="ratings")
+    ##generate prediction errors
+    err_svd <- calcPredictionAccuracy(p_svd, getData(scheme, "unknown"))
+    err_pop <- calcPredictionAccuracy(p_pop,getData(scheme, "unknown"))
+    err_ubcf <- calcPredictionAccuracy(p_ubcf,getData(scheme, "unknown"))
+    err_ibcf <- calcPredictionAccuracy(p_ibcf,getData(scheme, "unknown"))
+    df_err <- rbind(err_svd, err_pop, err_ubcf, err_ibcf)
+    df_err
+}
+```
+#split_scheme
+```{r}
+automate(split_scheme)
+```
+#cross-validation scheme
+```{r}
+automate(cv_scheme)
+```
+Based on predictive accuracy, we could use either SVD or POPULAR techniques to generate recommendations because they have the lowest prediction errors.
+
+##2.2.4 Use selected model to generate recommendations.
+```{r}
+rec <- Recommender(rate_max, method="SVD")
+rec
+```
+##Make recommendations for a range of users (say, users with UserId=1 to 3)
+##Return only top 3 recommended movies (i.e., n=3)
+```{r}
+recom_user3 <- predict(rec, rate_max[1:3], n=3)
+result3 <- as(recom_user3, "list")
+print("Top 3 Recommended Movies for User with UserId = 1 to 3")
+print("===================================================")
+result3
+```
+```{r}
+userIds <- c(1:10) ###list of user IDs
+i=1
+while (i<=6) {
+print(paste("Top 5 Recommended Movies for User with UserId =", userIds[i]))
+print("===================================================")
+print(result10[i])
+i = i+1
+}
+```
+
+Note: These users are probably similar, so similar movies are recommended to them.
+```{r}
+for(i in c(198,233,296)){
+  recom_users <- predict(rec,rate_max[i],n=3)
+  result_users <- as(recom_users,"list")
+  print(paste("Recommended movie based on user ratings for user=",i))
+  print("========================================")
+  print(result_users)
+  i=i+1
+}
+```
